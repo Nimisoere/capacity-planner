@@ -493,11 +493,14 @@ export default function CapacityPlanner() {
   const getPersonCapacity = (personId: number, weekId: string) => {
     const availability = getPersonAvailability(personId, weekId);
     const isFR = frSchedule[weekId] === personId;
+
+    // If FR, subtract FR days from available days
+    // e.g., 5 available - 3 FR = 2 days for projects
     return Math.max(0, availability - (isFR ? frCapacityDays : 0));
   };
 
   const getPersonAllocated = (personId: number, weekId: string) => {
-    return projects.reduce((total, project) => {
+    const projectAllocation = projects.reduce((total, project) => {
       const weekIndex = weekConfig.findIndex((w) => w.id === weekId);
       const startIndex = weekConfig.findIndex((w) => w.id === project.startWeek);
       const endIndex = weekConfig.findIndex((w) => w.id === project.endWeek);
@@ -510,6 +513,8 @@ export default function CapacityPlanner() {
       }
       return total;
     }, 0);
+
+    return projectAllocation;
   };
 
   const getTeamAverageAvailability = (weekId: string) => {
@@ -543,11 +548,6 @@ export default function CapacityPlanner() {
       avgCapacityPerWeek: totalCapacity / weeks.length,
       utilizationPercent: totalCapacity > 0 ? (totalAllocated / totalCapacity) * 100 : 0,
     };
-  };
-
-  const canBeFirstResponder = (personId: number, weekId: string) => {
-    const availability = getPersonAvailability(personId, weekId);
-    return availability >= frCapacityDays;
   };
 
   const addPerson = () => {
@@ -590,10 +590,6 @@ export default function CapacityPlanner() {
 
   const setFR = (weekId: string, personId: string) => {
     const id = personId ? parseInt(personId) : null;
-    if (id && !canBeFirstResponder(id, weekId)) {
-      alert('This person does not have enough availability this week for FR duty');
-      return;
-    }
     setFrSchedule({ ...frSchedule, [weekId]: id || 0 });
   };
 
@@ -722,7 +718,7 @@ export default function CapacityPlanner() {
                             {schedule.people.length} people • {schedule.projects.length} projects
                           </div>
                           <div>
-                            {new Date(schedule.planningPeriod.startDate).toLocaleDateString('en-GB', {
+                            {new Date(schedule.planningPeriod?.startDate).toLocaleDateString('en-GB', {
                               month: 'short',
                               day: 'numeric',
                               year: 'numeric',
@@ -847,13 +843,16 @@ export default function CapacityPlanner() {
                 <Input
                   id="num-weeks"
                   type="number"
-                  min="1"
+                  min="0"
                   max="26"
-                  value={planningPeriod.numberOfWeeks}
+                  placeholder="Number of weeks"
+                  defaultValue={planningPeriod.numberOfWeeks}
+                  key={`weeks-${planningPeriod.numberOfWeeks}`}
                   onChange={(e) => {
                     const val = e.target.value;
-                    if (val === '') return;
-                    updateNumberOfWeeks(parseInt(val) || 1);
+                    if (val !== '') {
+                      updateNumberOfWeeks(parseInt(val) || 0);
+                    }
                   }}
                 />
               </div>
@@ -913,15 +912,17 @@ export default function CapacityPlanner() {
                               Working days:
                               <Input
                                 type="number"
-                                min="1"
+                                min="0"
                                 max="5"
-                                value={week.workingDays}
+                                defaultValue={week.workingDays}
+                                key={`working-${week.id}-${week.workingDays}`}
                                 onChange={(e) => {
                                   const val = e.target.value;
-                                  if (val === '') return;
-                                  const newConfig = [...weekConfig];
-                                  newConfig[idx].workingDays = parseInt(val) || 1;
-                                  setWeekConfig(newConfig);
+                                  if (val !== '') {
+                                    const newConfig = [...weekConfig];
+                                    newConfig[idx].workingDays = parseInt(val) || 0;
+                                    setWeekConfig(newConfig);
+                                  }
                                 }}
                                 className="w-16"
                               />
@@ -932,13 +933,15 @@ export default function CapacityPlanner() {
                           <Label>FR Capacity (days per week)</Label>
                           <Input
                             type="number"
-                            min="1"
+                            min="0"
                             max="5"
-                            value={frCapacityDays}
+                            defaultValue={frCapacityDays}
+                            key={`fr-${frCapacityDays}`}
                             onChange={(e) => {
                               const val = e.target.value;
-                              if (val === '') return;
-                              setFrCapacityDays(parseInt(val) || 1);
+                              if (val !== '') {
+                                setFrCapacityDays(parseInt(val) || 0);
+                              }
                             }}
                             className="w-32 mt-2"
                           />
@@ -1056,14 +1059,11 @@ export default function CapacityPlanner() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="0">Not assigned</SelectItem>
-                        {people.map((person) => {
-                          const canBeFR = canBeFirstResponder(person.id, week.id);
-                          return (
-                            <SelectItem key={person.id} value={person.id.toString()} disabled={!canBeFR}>
-                              {person.name} {!canBeFR ? '(unavailable)' : ''}
-                            </SelectItem>
-                          );
-                        })}
+                        {people.map((person) => (
+                          <SelectItem key={person.id} value={person.id.toString()}>
+                            {person.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
