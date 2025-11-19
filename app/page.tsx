@@ -500,6 +500,15 @@ export default function CapacityPlanner() {
   };
 
   const getPersonAllocated = (personId: number, weekId: string) => {
+    const isFR = frSchedule[weekId] === personId;
+
+    // If person is FR this week, they're not working on projects
+    if (isFR) {
+      return 0;
+    }
+
+    const availability = getPersonAvailability(personId, weekId);
+
     const projectAllocation = projects.reduce((total, project) => {
       const weekIndex = weekConfig.findIndex((w) => w.id === weekId);
       const startIndex = weekConfig.findIndex((w) => w.id === project.startWeek);
@@ -514,7 +523,8 @@ export default function CapacityPlanner() {
       return total;
     }, 0);
 
-    return projectAllocation;
+    // Cap allocation at availability - you can't work more days than available
+    return Math.min(projectAllocation, availability);
   };
 
   const getTeamAverageAvailability = (weekId: string) => {
@@ -658,11 +668,11 @@ export default function CapacityPlanner() {
   // Show loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
-        <Card className="p-8 shadow-lg">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Loading schedules...</p>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-12 border-muted">
+          <div className="flex flex-col items-center gap-6">
+            <Loader2 className="w-10 h-10 animate-spin text-primary" />
+            <p className="text-base text-muted-foreground">Loading schedules...</p>
           </div>
         </Card>
       </div>
@@ -671,8 +681,8 @@ export default function CapacityPlanner() {
 
   if (view === 'list') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
-        <div className="container mx-auto p-6 space-y-6">
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto p-8 space-y-8 max-w-6xl">
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -682,13 +692,13 @@ export default function CapacityPlanner() {
 
           <div className="flex items-center justify-between py-4">
             <div>
-              <h1 className="text-4xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+              <h1 className="text-3xl font-bold mb-1">
                 Team Planner
               </h1>
-              <p className="text-muted-foreground mt-1">Manage your team capacity and projects</p>
+              <p className="text-sm text-muted-foreground">Manage your team capacity and projects</p>
             </div>
             <div className="flex items-center gap-3">
-              <Button onClick={createSchedule} size="default" className="shadow-md hover:shadow-lg transition-all">
+              <Button onClick={createSchedule}>
                 <Plus className="w-4 h-4 mr-2" />
                 New Schedule
               </Button>
@@ -696,71 +706,60 @@ export default function CapacityPlanner() {
             </div>
           </div>
 
-        <Card className="shadow-lg border-muted/50">
-          <CardHeader>
-            <CardTitle className="text-2xl">My Schedules</CardTitle>
-            <CardDescription>Select a schedule to view or create a new one</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4">
-              {schedules.map((schedule) => (
-                <Card key={schedule.id} className="hover:shadow-lg hover:border-primary/20 transition-all duration-200 border-2">
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <Input
-                          value={schedule.name}
-                          onChange={(e) => renameSchedule(schedule.id, e.target.value)}
-                          className="text-lg font-semibold border-0 px-0 focus-visible:ring-1 mb-2"
-                        />
-                        <div className="text-sm text-muted-foreground space-y-1">
-                          <div>
-                            {schedule.people.length} people • {schedule.projects.length} projects
-                          </div>
-                          <div>
-                            {new Date(schedule.planningPeriod?.startDate).toLocaleDateString('en-GB', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })}{' '}
-                            - {schedule.planningPeriod.numberOfWeeks} weeks
-                          </div>
-                          <div className="text-xs">
-                            Last updated: {new Date(schedule.updatedAt).toLocaleString('en-GB')}
-                          </div>
-                        </div>
+        <div className="space-y-4">
+          {schedules.map((schedule) => (
+            <Card key={schedule.id} className="hover:bg-muted/30 transition-colors border-muted">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <Input
+                      value={schedule.name}
+                      onChange={(e) => renameSchedule(schedule.id, e.target.value)}
+                      className="text-lg font-semibold border-0 px-0 focus-visible:ring-1 mb-2 bg-transparent"
+                    />
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <div>
+                        {schedule.people.length} people • {schedule.projects.length} projects
                       </div>
-                      <div className="flex gap-2">
-                        <Button onClick={() => openSchedule(schedule.id)} size="sm" className="shadow-sm">
-                          Open
-                        </Button>
-                        <Button onClick={() => duplicateSchedule(schedule.id)} variant="outline" size="sm" className="shadow-sm">
-                          Duplicate
-                        </Button>
-                        <Button
-                          onClick={() => deleteSchedule(schedule.id)}
-                          variant="ghost"
-                          size="sm"
-                          disabled={schedules.length === 1}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                      <div>
+                        {new Date(schedule.planningPeriod?.startDate).toLocaleDateString('en-GB', {
+                          month: 'short',
+                          day: 'numeric',
+                        })}{' '}
+                        • {schedule.planningPeriod.numberOfWeeks} weeks
                       </div>
                     </div>
-                  </CardHeader>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={() => openSchedule(schedule.id)} size="sm">
+                      Open
+                    </Button>
+                    <Button onClick={() => duplicateSchedule(schedule.id)} variant="outline" size="sm">
+                      Duplicate
+                    </Button>
+                    <Button
+                      onClick={() => deleteSchedule(schedule.id)}
+                      variant="ghost"
+                      size="icon"
+                      disabled={schedules.length === 1}
+                      className="hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
-      <div className="container mx-auto p-6 space-y-6">
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto p-6 space-y-6 max-w-7xl">
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -768,65 +767,61 @@ export default function CapacityPlanner() {
           </Alert>
         )}
 
-        <div className="flex items-center justify-between py-4">
+        <div className="flex items-center justify-between py-3 border-b">
           <div>
             <Button onClick={() => setView('list')} variant="ghost" size="sm" className="mb-2">
-              ← Back to Schedules
+              ← Back
             </Button>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold">{currentSchedule?.name}</h1>
+              <h1 className="text-2xl font-semibold">{currentSchedule?.name}</h1>
               {isSaving && (
-                <Badge variant="secondary" className="animate-pulse">
+                <Badge variant="secondary" className="text-xs">
                   <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                  Saving...
+                  Saving
                 </Badge>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button onClick={shareSchedule} variant="outline" size="sm" className="shadow-sm hover:shadow-md transition-all">
-              <Share2 className="w-4 h-4 mr-2" />
+          <div className="flex items-center gap-2">
+            <Button onClick={shareSchedule} variant="outline" size="sm">
+              <Share2 className="w-4 h-4 mr-1" />
               Share
             </Button>
-            <Button onClick={exportData} variant="outline" size="sm" className="shadow-sm hover:shadow-md transition-all">
-              <Download className="w-4 h-4 mr-2" />
-              Export CSV
+            <Button onClick={exportData} variant="outline" size="sm">
+              <Download className="w-4 h-4 mr-1" />
+              Export
             </Button>
-            <Button onClick={() => deleteSchedule(currentSchedule?.id || '')} variant="destructive" size="sm" className="shadow-sm hover:shadow-md transition-all">
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
+            <Button onClick={() => deleteSchedule(currentSchedule?.id || '')} variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10">
+              <Trash2 className="w-4 h-4" />
             </Button>
             <UserButton />
           </div>
         </div>
 
       <Tabs defaultValue="setup" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 bg-muted/50 p-1 h-auto shadow-sm">
-          <TabsTrigger value="setup" className="data-[state=active]:shadow-md">
+        <TabsList className="grid w-full grid-cols-4 bg-muted/30 p-1 h-auto">
+          <TabsTrigger value="setup" className="data-[state=active]:bg-background text-sm">
             <Calendar className="w-4 h-4 mr-2" />
-            Setup & Holidays
+            Setup
           </TabsTrigger>
-          <TabsTrigger value="capacity" className="data-[state=active]:shadow-md">
+          <TabsTrigger value="capacity" className="data-[state=active]:bg-background text-sm">
             <TrendingUp className="w-4 h-4 mr-2" />
             Capacity
           </TabsTrigger>
-          <TabsTrigger value="projects" className="data-[state=active]:shadow-md">
+          <TabsTrigger value="projects" className="data-[state=active]:bg-background text-sm">
             <Users className="w-4 h-4 mr-2" />
             Projects
           </TabsTrigger>
-          <TabsTrigger value="reports" className="data-[state=active]:shadow-md">
+          <TabsTrigger value="reports" className="data-[state=active]:bg-background text-sm">
             <AlertCircle className="w-4 h-4 mr-2" />
             Reports
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="setup" className="space-y-6">
-          <Card className="shadow-lg border-muted/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
-                Planning Period
-              </CardTitle>
+        <TabsContent value="setup" className="space-y-4 mt-4">
+          <Card className="bg-muted/20 border-muted">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">Planning Period</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
@@ -872,19 +867,16 @@ export default function CapacityPlanner() {
             </CardContent>
           </Card>
 
-          <Card className="shadow-lg border-muted/50">
-            <CardHeader>
+          <Card className="bg-muted/20 border-muted">
+            <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="w-5 h-5" />
-                  Team Setup
-                </CardTitle>
+                <CardTitle className="text-base font-semibold">Team Setup</CardTitle>
                 <div className="flex gap-2">
                   <Dialog open={showWeekConfig} onOpenChange={setShowWeekConfig}>
                     <DialogTrigger asChild>
                       <Button variant="outline" size="sm">
                         <Settings className="w-4 h-4 mr-2" />
-                        Week Config
+                        Weeks
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
@@ -958,18 +950,18 @@ export default function CapacityPlanner() {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <Table className="w-full border-collapse">
+                <Table className="w-full">
                   <TableHeader>
-                    <TableRow className="border-b">
-                      <TableHead className="text-left p-3 font-medium">Person</TableHead>
+                    <TableRow className="border-b hover:bg-transparent">
+                      <TableHead className="text-left p-2 font-medium text-xs">Person</TableHead>
                       {weekConfig.map((week, idx) => (
-                        <TableHead key={week.id} className="text-center p-3 font-medium">
-                          <div className="font-semibold text-sm">{formatWeekDateRange(idx)}</div>
-                          <div className="text-xs text-muted-foreground">{week.workingDays} days</div>
+                        <TableHead key={week.id} className="text-center p-2 font-medium text-xs">
+                          <div className="font-medium">{formatWeekDateRange(idx)}</div>
+                          <div className="text-xs text-muted-foreground font-normal">{week.workingDays}d</div>
                         </TableHead>
                       ))}
-                      <TableHead className="text-center p-3 font-medium">Avg</TableHead>
-                      <TableHead className="p-3"></TableHead>
+                      <TableHead className="text-center p-2 font-medium text-xs">Avg</TableHead>
+                      <TableHead className="p-2"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -979,12 +971,12 @@ export default function CapacityPlanner() {
                         weekConfig.length;
 
                       return (
-                        <TableRow key={person.id} className="border-b">
-                          <TableCell className="p-3">
+                        <TableRow key={person.id} className="border-b hover:bg-muted/20">
+                          <TableCell className="p-2">
                             <Input
                               value={person.name}
                               onChange={(e) => updatePerson(person.id, e.target.value)}
-                              className="w-full"
+                              className="w-full h-8 text-sm"
                             />
                           </TableCell>
                           {weekConfig.map((week) => {
@@ -992,9 +984,9 @@ export default function CapacityPlanner() {
                             const holidayDays = holidays[`${person.id}-${week.id}`] || 0;
 
                             return (
-                              <TableCell key={week.id} className="p-3">
+                              <TableCell key={week.id} className="p-2">
                                 <div className="text-center space-y-1">
-                                  <div className="text-sm font-semibold text-green-700">{availability}d avail</div>
+                                  <div className="text-xs font-medium">{availability}d</div>
                                   <Input
                                     type="number"
                                     min="0"
@@ -1002,38 +994,37 @@ export default function CapacityPlanner() {
                                     step="0.5"
                                     value={holidayDays || ''}
                                     onChange={(e) => setHoliday(person.id, week.id, e.target.value)}
-                                    className="w-16 mx-auto text-xs"
+                                    className="w-14 mx-auto text-xs h-7"
                                     placeholder="0"
                                   />
-                                  <div className="text-xs text-muted-foreground">days off</div>
+                                  <div className="text-xs text-muted-foreground">off</div>
                                 </div>
                               </TableCell>
                             );
                           })}
-                          <TableCell className="p-3 text-center font-semibold">{avgAvail.toFixed(1)}d</TableCell>
-                          <TableCell className="p-3">
-                            <Button onClick={() => deletePerson(person.id)} variant="ghost" size="sm">
-                              <Trash2 className="w-4 h-4" />
+                          <TableCell className="p-2 text-center text-sm font-medium">{avgAvail.toFixed(1)}d</TableCell>
+                          <TableCell className="p-2">
+                            <Button onClick={() => deletePerson(person.id)} variant="ghost" size="icon" className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive">
+                              <Trash2 className="w-3 h-3" />
                             </Button>
                           </TableCell>
                         </TableRow>
                       );
                     })}
-                    <TableRow className="bg-muted font-semibold">
-                      <TableCell className="p-3">Team Average</TableCell>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell className="p-2 text-sm font-medium">Team Avg</TableCell>
                       {weekConfig.map((week) => (
-                        <TableCell key={week.id} className="p-3 text-center">
+                        <TableCell key={week.id} className="p-2 text-center text-sm font-medium">
                           {getTeamAverageAvailability(week.id).toFixed(1)}d
                         </TableCell>
                       ))}
-                      <TableCell className="p-3 text-center">
+                      <TableCell className="p-2 text-center text-sm font-medium">
                         {(
                           weekConfig.reduce((sum, week) => sum + getTeamAverageAvailability(week.id), 0) /
                           weekConfig.length
-                        ).toFixed(1)}
-                        d
+                        ).toFixed(1)}d
                       </TableCell>
-                      <TableCell className="p-3"></TableCell>
+                      <TableCell className="p-2"></TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
@@ -1041,10 +1032,9 @@ export default function CapacityPlanner() {
             </CardContent>
           </Card>
 
-          <Card className="shadow-lg border-muted/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5" />
+          <Card className="bg-muted/20 border-muted">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">
                 First Responder Schedule ({frCapacityDays}d per week)
               </CardTitle>
             </CardHeader>
@@ -1073,29 +1063,29 @@ export default function CapacityPlanner() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="capacity" className="space-y-6">
+        <TabsContent value="capacity" className="space-y-4 mt-4">
           <div className="grid grid-cols-4 gap-4">
-            <Card className="shadow-md border-muted/50">
-              <CardHeader className="pb-3">
-                <CardDescription>Total Availability</CardDescription>
+            <Card className="bg-muted/20 border-muted">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Total Availability</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{quarterStats.totalAvailability.toFixed(0)}d</div>
                 <p className="text-xs text-muted-foreground">Avg {quarterStats.avgAvailabilityPerWeek.toFixed(1)}d/week</p>
               </CardContent>
             </Card>
-            <Card className="shadow-md border-muted/50">
-              <CardHeader className="pb-3">
-                <CardDescription>Available Capacity</CardDescription>
+            <Card className="bg-muted/20 border-muted">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Available Capacity</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{quarterStats.totalCapacity.toFixed(0)}d</div>
                 <p className="text-xs text-muted-foreground">After FR duties</p>
               </CardContent>
             </Card>
-            <Card className="shadow-md border-muted/50">
-              <CardHeader className="pb-3">
-                <CardDescription>Allocated</CardDescription>
+            <Card className="bg-muted/20 border-muted">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Allocated</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{quarterStats.totalAllocated.toFixed(0)}d</div>
@@ -1105,12 +1095,12 @@ export default function CapacityPlanner() {
             <Card
               className={
                 quarterStats.totalAllocated > quarterStats.totalCapacity
-                  ? 'border-destructive'
-                  : ''
+                  ? 'bg-destructive/5 border-destructive/30'
+                  : 'bg-muted/20 border-muted'
               }
             >
-              <CardHeader className="pb-3">
-                <CardDescription>Remaining</CardDescription>
+              <CardHeader className="pb-2">
+                <CardDescription className="text-xs">Remaining</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
@@ -1123,18 +1113,18 @@ export default function CapacityPlanner() {
             </Card>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Weekly Breakdown</CardTitle>
+          <Card className="bg-muted/20 border-muted">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">Weekly Breakdown</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <Table className="w-full border-collapse">
+                <Table className="w-full">
                   <TableHeader>
-                    <TableRow className="border-b">
-                      <TableHead className="text-left p-3 font-medium">Person</TableHead>
+                    <TableRow className="border-b hover:bg-transparent">
+                      <TableHead className="text-left p-2 font-medium text-xs">Person</TableHead>
                       {weekConfig.map((week, idx) => (
-                        <TableHead key={week.id} className="text-center p-3 font-medium text-sm">
+                        <TableHead key={week.id} className="text-center p-2 font-medium text-xs">
                           {formatWeekDateRange(idx)}
                         </TableHead>
                       ))}
@@ -1142,8 +1132,8 @@ export default function CapacityPlanner() {
                   </TableHeader>
                   <TableBody>
                     {people.map((person) => (
-                      <TableRow key={person.id} className="border-b">
-                        <TableCell className="p-3 font-medium">{person.name}</TableCell>
+                      <TableRow key={person.id} className="border-b hover:bg-muted/20">
+                        <TableCell className="p-2 text-sm font-medium">{person.name}</TableCell>
                         {weekConfig.map((week) => {
                           const capacity = getPersonCapacity(person.id, week.id);
                           const allocated = getPersonAllocated(person.id, week.id);
@@ -1153,14 +1143,14 @@ export default function CapacityPlanner() {
                           return (
                             <TableCell
                               key={week.id}
-                              className={`text-center p-3 ${isOver ? 'bg-destructive/10' : ''}`}
+                              className={`text-center p-2 ${isOver ? 'bg-destructive/10' : ''}`}
                             >
-                              <div className="text-xs">
-                                <div className="font-semibold">
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-medium">
                                   {allocated.toFixed(1)} / {capacity.toFixed(1)}d
                                 </div>
-                                {isFR && <Badge variant="outline" className="text-xs mt-1">FR</Badge>}
-                                {isOver && <AlertCircle className="w-3 h-3 text-destructive mx-auto mt-1" />}
+                                {isFR && <Badge variant="outline" className="text-xs">FR</Badge>}
+                                {isOver && <AlertCircle className="w-3 h-3 text-destructive mx-auto" />}
                               </div>
                             </TableCell>
                           );
@@ -1174,10 +1164,10 @@ export default function CapacityPlanner() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="projects" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Projects</h2>
-            <Button onClick={addProject}>
+        <TabsContent value="projects" className="space-y-4 mt-4">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-lg font-semibold">Projects</h2>
+            <Button onClick={addProject} size="sm">
               <Plus className="w-4 h-4 mr-2" />
               Add Project
             </Button>
@@ -1194,15 +1184,15 @@ export default function CapacityPlanner() {
             }, 0);
 
             return (
-              <Card key={project.id} className="shadow-lg hover:shadow-xl transition-shadow border-muted/50">
-                <CardHeader>
+              <Card key={project.id} className="bg-muted/20 border-muted hover:bg-muted/30 transition-colors">
+                <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <Input
                       value={project.name}
                       onChange={(e) => updateProject(project.id, { name: e.target.value })}
-                      className="text-lg font-semibold border-0 px-0 focus-visible:ring-0"
+                      className="text-base font-semibold border-0 px-0 focus-visible:ring-1 bg-transparent"
                     />
-                    <Button onClick={() => deleteProject(project.id)} variant="ghost" size="sm">
+                    <Button onClick={() => deleteProject(project.id)} variant="ghost" size="sm" className="hover:bg-destructive/10 hover:text-destructive">
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
@@ -1326,11 +1316,11 @@ export default function CapacityPlanner() {
           })}
         </TabsContent>
 
-        <TabsContent value="reports" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Per-Person Schedule</CardTitle>
-              <CardDescription>View each team member&apos;s allocation across all weeks</CardDescription>
+        <TabsContent value="reports" className="space-y-4 mt-4">
+          <Card className="bg-muted/20 border-muted">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">Per-Person Schedule</CardTitle>
+              <CardDescription className="text-sm">View each team member&apos;s allocation across all weeks</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -1427,10 +1417,10 @@ export default function CapacityPlanner() {
             </CardContent>
           </Card>
 
-          <Card className="shadow-lg border-muted/50">
-            <CardHeader>
-              <CardTitle>Project Timeline</CardTitle>
-              <CardDescription>Visual overview of all projects</CardDescription>
+          <Card className="bg-muted/20 border-muted">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">Project Timeline</CardTitle>
+              <CardDescription className="text-sm">Visual overview of all projects</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">

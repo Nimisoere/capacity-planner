@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -27,7 +27,7 @@ interface SharedData {
   }>;
 }
 
-export default function SharedView() {
+function SharedViewContent() {
   const searchParams = useSearchParams();
   const [data, setData] = useState<SharedData | null>(null);
   const [error, setError] = useState<string>('');
@@ -292,5 +292,13 @@ export default function SharedView() {
         <p>This is a read-only view. To create or edit schedules, visit Team Planner.</p>
       </div>
     </div>
+  );
+}
+
+export default function SharedView() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <SharedViewContent />
+    </Suspense>
   );
 }
