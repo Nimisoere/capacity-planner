@@ -49,8 +49,8 @@ const createDefaultSchedule = (): Schedule => ({
       startWeek: 'W1',
       endWeek: 'W3',
       assignments: [
-        { personId: 1, daysPerWeek: 3 },
-        { personId: 2, daysPerWeek: 4 },
+        { personId: 1, daysPerWeek: 3, startWeek: 'W1', endWeek: 'W3' },
+        { personId: 2, daysPerWeek: 4, startWeek: 'W1', endWeek: 'W3' },
       ],
     },
   ],
@@ -70,6 +70,8 @@ interface WeekConfig {
 interface ProjectAssignment {
   personId: number;
   daysPerWeek: number;
+  startWeek: string;
+  endWeek: string;
 }
 
 interface Project {
@@ -187,7 +189,17 @@ export default function CapacityPlanner() {
       setHolidays(currentSchedule.holidays);
       setFrSchedule(currentSchedule.frSchedule);
       setFrCapacityDays(currentSchedule.frCapacityDays);
-      setProjects(currentSchedule.projects);
+
+      // Migrate old projects that don't have per-person start/end weeks
+      const migratedProjects = currentSchedule.projects.map((project) => ({
+        ...project,
+        assignments: project.assignments.map((assignment: any) => ({
+          ...assignment,
+          startWeek: assignment.startWeek || project.startWeek,
+          endWeek: assignment.endWeek || project.endWeek,
+        })),
+      }));
+      setProjects(migratedProjects);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedScheduleId]);
@@ -510,15 +522,16 @@ export default function CapacityPlanner() {
     const availability = getPersonAvailability(personId, weekId);
 
     const projectAllocation = projects.reduce((total, project) => {
-      const weekIndex = weekConfig.findIndex((w) => w.id === weekId);
-      const startIndex = weekConfig.findIndex((w) => w.id === project.startWeek);
-      const endIndex = weekConfig.findIndex((w) => w.id === project.endWeek);
+      const assignment = project.assignments.find((a) => a.personId === personId);
+      if (!assignment) return total;
 
-      if (weekIndex >= startIndex && weekIndex <= endIndex) {
-        const assignment = project.assignments.find((a) => a.personId === personId);
-        if (assignment) {
-          return total + assignment.daysPerWeek;
-        }
+      // Check if this week is within the person's assignment range
+      const weekIndex = weekConfig.findIndex((w) => w.id === weekId);
+      const assignmentStartIndex = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+      const assignmentEndIndex = weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+      if (weekIndex >= assignmentStartIndex && weekIndex <= assignmentEndIndex) {
+        return total + assignment.daysPerWeek;
       }
       return total;
     }, 0);
@@ -628,7 +641,12 @@ export default function CapacityPlanner() {
         if (p.id === projectId && !p.assignments.find((a) => a.personId === personId)) {
           return {
             ...p,
-            assignments: [...p.assignments, { personId, daysPerWeek: 2 }],
+            assignments: [...p.assignments, {
+              personId,
+              daysPerWeek: 2,
+              startWeek: p.startWeek,
+              endWeek: p.endWeek
+            }],
           };
         }
         return p;
@@ -636,14 +654,14 @@ export default function CapacityPlanner() {
     );
   };
 
-  const updateAssignment = (projectId: number, personId: number, daysPerWeek: number) => {
+  const updateAssignment = (projectId: number, personId: number, updates: Partial<ProjectAssignment>) => {
     setProjects(
       projects.map((p) => {
         if (p.id === projectId) {
           return {
             ...p,
             assignments: p.assignments.map((a) =>
-              a.personId === personId ? { ...a, daysPerWeek: parseFloat(daysPerWeek.toString()) } : a
+              a.personId === personId ? { ...a, ...updates } : a
             ),
           };
         }
@@ -1184,20 +1202,39 @@ export default function CapacityPlanner() {
             }, 0);
 
             return (
-              <Card key={project.id} className="bg-muted/20 border-muted hover:bg-muted/30 transition-colors">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <Input
-                      value={project.name}
-                      onChange={(e) => updateProject(project.id, { name: e.target.value })}
-                      className="text-base font-semibold border-0 px-0 focus-visible:ring-1 bg-transparent"
-                    />
-                    <Button onClick={() => deleteProject(project.id)} variant="ghost" size="sm" className="hover:bg-destructive/10 hover:text-destructive">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+              <Collapsible key={project.id} className="bg-muted/20 border rounded-lg hover:bg-muted/30 transition-colors">
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-4 hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-3 flex-1">
+                    <ChevronDown className="w-4 h-4 transition-transform [[data-state=open]>&]:rotate-180" />
+                    <div className="text-left flex-1">
+                      <div className="font-semibold text-sm">{project.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatWeekDateRange(startIdx)} → {formatWeekDateRange(endIdx)} • {project.assignments.length} people
+                      </div>
+                    </div>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteProject(project.id);
+                    }}
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="px-4 pb-4">
+                  <div className="space-y-4 pt-2">
+                    <div className="space-y-2">
+                      <Label>Project Name</Label>
+                      <Input
+                        value={project.name}
+                        onChange={(e) => updateProject(project.id, { name: e.target.value })}
+                        className="text-sm"
+                      />
+                    </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Start Week</Label>
@@ -1250,34 +1287,78 @@ export default function CapacityPlanner() {
                     <Label>Team Assignments</Label>
                     {project.assignments.map((assignment) => {
                       const person = people.find((p) => p.id === assignment.personId);
+                      const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                      const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
                       return (
-                        <div key={assignment.personId} className="flex items-center gap-3">
-                          <span className="w-24 text-sm">{person?.name}</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            max="5"
-                            step="0.5"
-                            value={assignment.daysPerWeek || ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (val === '') {
-                                updateAssignment(project.id, assignment.personId, 0);
-                                return;
-                              }
-                              updateAssignment(project.id, assignment.personId, parseFloat(val));
-                            }}
-                            className="w-20"
-                          />
-                          <span className="text-sm text-muted-foreground">days/week</span>
-                          <Button
-                            onClick={() => removeAssignment(project.id, assignment.personId)}
-                            variant="ghost"
-                            size="sm"
-                            className="ml-auto"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
+                        <div key={assignment.personId} className="border rounded-lg p-3 space-y-3 bg-background">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-sm">{person?.name}</span>
+                            <Button
+                              onClick={() => removeAssignment(project.id, assignment.personId)}
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Days/Week</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                max="5"
+                                step="0.5"
+                                value={assignment.daysPerWeek || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '') {
+                                    updateAssignment(project.id, assignment.personId, { daysPerWeek: 0 });
+                                    return;
+                                  }
+                                  updateAssignment(project.id, assignment.personId, { daysPerWeek: parseFloat(val) });
+                                }}
+                                className="h-8 text-sm"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Start Week</Label>
+                              <Select
+                                value={assignment.startWeek}
+                                onValueChange={(val) => updateAssignment(project.id, assignment.personId, { startWeek: val })}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {weekConfig.map((week, idx) => (
+                                    <SelectItem key={week.id} value={week.id}>
+                                      {formatWeekDateRange(idx)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">End Week</Label>
+                              <Select
+                                value={assignment.endWeek}
+                                onValueChange={(val) => updateAssignment(project.id, assignment.personId, { endWeek: val })}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {weekConfig.map((week, idx) => (
+                                    <SelectItem key={week.id} value={week.id}>
+                                      {formatWeekDateRange(idx)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
@@ -1310,8 +1391,9 @@ export default function CapacityPlanner() {
                       className="min-h-[100px] resize-none"
                     />
                   </div>
-                </CardContent>
-              </Card>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </TabsContent>

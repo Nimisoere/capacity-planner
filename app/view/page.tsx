@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState, Suspense } from 'react';
+import React, { Suspense } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -22,32 +22,43 @@ interface SharedData {
     name: string;
     startWeek: string;
     endWeek: string;
-    assignments: Array<{ personId: number; daysPerWeek: number }>;
+    assignments: Array<{ personId: number; daysPerWeek: number; startWeek: string; endWeek: string }>;
     notes?: string;
   }>;
 }
 
 function SharedViewContent() {
   const searchParams = useSearchParams();
-  const [data, setData] = useState<SharedData | null>(null);
-  const [error, setError] = useState<string>('');
+  const encoded = searchParams.get('data');
 
-  useEffect(() => {
-    const encoded = searchParams.get('data');
+  // Parse and migrate data directly without effect
+  const { data, error } = React.useMemo(() => {
     if (!encoded) {
-      setError('No schedule data found in URL');
-      return;
+      return { data: null, error: 'No schedule data found in URL' };
     }
 
     try {
       const decoded = atob(encoded);
       const parsed = JSON.parse(decoded);
-      setData(parsed);
+
+      // Migrate old data that doesn't have per-person start/end weeks
+      if (parsed.projects) {
+        parsed.projects = parsed.projects.map((project: SharedData['projects'][0]) => ({
+          ...project,
+          assignments: project.assignments.map((assignment: SharedData['projects'][0]['assignments'][0]) => ({
+            ...assignment,
+            startWeek: assignment.startWeek || project.startWeek,
+            endWeek: assignment.endWeek || project.endWeek,
+          })),
+        }));
+      }
+
+      return { data: parsed as SharedData, error: '' };
     } catch (e) {
-      setError('Invalid schedule data');
       console.error(e);
+      return { data: null, error: 'Invalid schedule data' };
     }
-  }, [searchParams]);
+  }, [encoded]);
 
   if (error) {
     return (
@@ -106,16 +117,19 @@ function SharedViewContent() {
   };
 
   const getPersonAllocated = (personId: number, weekId: string) => {
-    return data.projects.reduce((total, project) => {
-      const weekIndex = data.weekConfig.findIndex((w) => w.id === weekId);
-      const startIndex = data.weekConfig.findIndex((w) => w.id === project.startWeek);
-      const endIndex = data.weekConfig.findIndex((w) => w.id === project.endWeek);
+    const isFR = data.frSchedule[weekId] === personId;
+    if (isFR) return 0;
 
-      if (weekIndex >= startIndex && weekIndex <= endIndex) {
-        const assignment = project.assignments.find((a) => a.personId === personId);
-        if (assignment) {
-          return total + assignment.daysPerWeek;
-        }
+    return data.projects.reduce((total, project) => {
+      const assignment = project.assignments.find((a) => a.personId === personId);
+      if (!assignment) return total;
+
+      const weekIndex = data.weekConfig.findIndex((w) => w.id === weekId);
+      const assignmentStartIndex = data.weekConfig.findIndex((w) => w.id === assignment.startWeek);
+      const assignmentEndIndex = data.weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+      if (weekIndex >= assignmentStartIndex && weekIndex <= assignmentEndIndex) {
+        return total + assignment.daysPerWeek;
       }
       return total;
     }, 0);
