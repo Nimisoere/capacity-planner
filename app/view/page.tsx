@@ -120,7 +120,9 @@ function SharedViewContent() {
     const isFR = data.frSchedule[weekId] === personId;
     if (isFR) return 0;
 
-    return data.projects.reduce((total, project) => {
+    const availability = getPersonAvailability(personId, weekId);
+
+    const projectAllocation = data.projects.reduce((total, project) => {
       const assignment = project.assignments.find((a) => a.personId === personId);
       if (!assignment) return total;
 
@@ -133,6 +135,9 @@ function SharedViewContent() {
       }
       return total;
     }, 0);
+
+    // Cap allocation at availability - you can't work more days than available
+    return Math.min(projectAllocation, availability);
   };
 
   return (
@@ -241,13 +246,20 @@ function SharedViewContent() {
                                 <TableCell className="text-sm font-semibold">{allocated.toFixed(1)}d</TableCell>
                                 <TableCell className="text-sm">
                                   {personProjects.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
+                                    <div className="flex flex-col gap-1">
                                       {personProjects.map((project) => {
                                         const assignment = project.assignments.find((a) => a.personId === person.id);
+                                        const startIdx = data.weekConfig.findIndex((w) => w.id === assignment?.startWeek);
+                                        const endIdx = data.weekConfig.findIndex((w) => w.id === assignment?.endWeek);
                                         return (
-                                          <Badge key={project.id} variant="secondary" className="text-xs">
-                                            {project.name} ({assignment?.daysPerWeek}d)
-                                          </Badge>
+                                          <div key={project.id} className="flex items-start gap-1">
+                                            <Badge variant="secondary" className="text-xs">
+                                              {project.name}
+                                            </Badge>
+                                            <span className="text-xs text-muted-foreground">
+                                              {assignment?.daysPerWeek}d/wk • {formatWeekDateRange(startIdx)} → {formatWeekDateRange(endIdx)}
+                                            </span>
+                                          </div>
                                         );
                                       })}
                                     </div>
@@ -282,16 +294,78 @@ function SharedViewContent() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {data.projects.map((project) => (
+            {data.projects.map((project) => {
+              const startIdx = data.weekConfig.findIndex((w) => w.id === project.startWeek);
+              const endIdx = data.weekConfig.findIndex((w) => w.id === project.endWeek);
+              const projectWeeks = data.weekConfig.slice(startIdx, endIdx + 1);
+
+              // Calculate planned capacity (what's assigned)
+              const plannedCapacity = projectWeeks.reduce((total, week) => {
+                const weekIndex = data.weekConfig.findIndex((w) => w.id === week.id);
+
+                const weekCapacity = project.assignments.reduce((sum, assignment) => {
+                  const assignmentStartIdx = data.weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                  const assignmentEndIdx = data.weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+                  if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
+                    return sum + assignment.daysPerWeek;
+                  }
+                  return sum;
+                }, 0);
+
+                return total + weekCapacity;
+              }, 0);
+
+              // Calculate actual available capacity (considering holidays, FR, availability)
+              const actualCapacity = projectWeeks.reduce((total, week) => {
+                const weekIndex = data.weekConfig.findIndex((w) => w.id === week.id);
+
+                const weekCapacity = project.assignments.reduce((sum, assignment) => {
+                  const assignmentStartIdx = data.weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                  const assignmentEndIdx = data.weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+                  if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
+                    const personCapacity = getPersonCapacity(assignment.personId, week.id);
+                    // Person can contribute min of their assignment or their available capacity
+                    return sum + Math.min(assignment.daysPerWeek, personCapacity);
+                  }
+                  return sum;
+                }, 0);
+
+                return total + weekCapacity;
+              }, 0);
+
+              return (
               <div key={project.id} className="border rounded-lg p-4 space-y-2">
-                <h4 className="font-semibold">{project.name}</h4>
-                <div className="flex flex-wrap gap-2 text-sm">
+                <div>
+                  <h4 className="font-semibold">{project.name}</h4>
+                  <div className={`text-xs font-medium ${actualCapacity < plannedCapacity ? 'text-warning' : 'text-muted-foreground'}`}>
+                    {actualCapacity.toFixed(0)} / {plannedCapacity.toFixed(0)} days
+                    {plannedCapacity > 0 && (
+                      <span className="ml-1">
+                        ({((actualCapacity / plannedCapacity) * 100).toFixed(0)}%)
+                      </span>
+                    )}
+                    {actualCapacity < plannedCapacity && <span className="ml-1">⚠ Reduced by holidays/FR</span>}
+                  </div>
+                </div>
+                <div className="space-y-2">
                   {project.assignments.map((assignment) => {
                     const person = data.people.find((p) => p.id === assignment.personId);
+                    const assignmentStartIdx = data.weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                    const assignmentEndIdx = data.weekConfig.findIndex((w) => w.id === assignment.endWeek);
                     return (
-                      <Badge key={assignment.personId} variant="outline">
-                        {person?.name} - {assignment.daysPerWeek}d/week
-                      </Badge>
+                      <div key={assignment.personId} className="flex items-center justify-between text-sm bg-muted/30 rounded px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{person?.name}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            {assignment.daysPerWeek}d/week
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatWeekDateRange(assignmentStartIdx)} → {formatWeekDateRange(assignmentEndIdx)}
+                        </span>
+                      </div>
                     );
                   })}
                 </div>
@@ -299,7 +373,8 @@ function SharedViewContent() {
                   <p className="text-sm text-muted-foreground mt-2 pt-2 border-t">{project.notes}</p>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </CardContent>
       </Card>
