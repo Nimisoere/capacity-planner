@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Trash2, AlertCircle, Users, Calendar, TrendingUp, Settings, Download, Upload, ChevronDown, Share2, Loader2 } from 'lucide-react';
 import { UserButton } from '@clerk/nextjs';
 import { Button } from '@/components/ui/button';
@@ -540,6 +540,27 @@ export default function CapacityPlanner() {
     return Math.min(projectAllocation, availability);
   };
 
+  // Color coding helpers
+  const getUtilizationColor = (utilization: number) => {
+    if (utilization > 100) return 'text-destructive';
+    if (utilization >= 70 && utilization <= 95) return 'text-green-600';
+    if (utilization >= 50 && utilization < 70) return 'text-yellow-600';
+    if (utilization >= 95 && utilization <= 100) return 'text-yellow-600';
+    return 'text-destructive'; // < 50%
+  };
+
+  const getFreeDaysColor = (freeDays: number) => {
+    if (freeDays < 0) return 'text-destructive';
+    if (freeDays === 0) return 'text-yellow-600';
+    return 'text-green-600';
+  };
+
+  const getCapacityPercentColor = (percent: number) => {
+    if (percent >= 90) return 'text-green-600';
+    if (percent >= 70) return 'text-yellow-600';
+    return 'text-destructive';
+  };
+
   const getTeamAverageAvailability = (weekId: string) => {
     if (people.length === 0) return 0;
     const total = people.reduce((sum, person) => sum + getPersonAvailability(person.id, weekId), 0);
@@ -572,6 +593,57 @@ export default function CapacityPlanner() {
       utilizationPercent: totalCapacity > 0 ? (totalAllocated / totalCapacity) * 100 : 0,
     };
   };
+
+  // Memoize project capacity calculations to avoid recalculation
+  const projectCapacities = useMemo(() => {
+    return projects.map((project) => {
+      const startIdx = weekConfig.findIndex((w) => w.id === project.startWeek);
+      const endIdx = weekConfig.findIndex((w) => w.id === project.endWeek);
+      const projectWeeks = weekConfig.slice(startIdx, endIdx + 1);
+
+      // Calculate planned capacity (what's assigned)
+      const plannedCapacity = projectWeeks.reduce((total, week) => {
+        const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
+
+        const weekCapacity = project.assignments.reduce((sum, assignment) => {
+          const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+          const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+          if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
+            return sum + assignment.daysPerWeek;
+          }
+          return sum;
+        }, 0);
+
+        return total + weekCapacity;
+      }, 0);
+
+      // Calculate actual available capacity (considering holidays, FR, availability)
+      const actualCapacity = projectWeeks.reduce((total, week) => {
+        const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
+
+        const weekCapacity = project.assignments.reduce((sum, assignment) => {
+          const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+          const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+          if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
+            const personCapacity = getPersonCapacity(assignment.personId, week.id);
+            return sum + Math.min(assignment.daysPerWeek, personCapacity);
+          }
+          return sum;
+        }, 0);
+
+        return total + weekCapacity;
+      }, 0);
+
+      return {
+        projectId: project.id,
+        plannedCapacity,
+        actualCapacity,
+        percentage: plannedCapacity > 0 ? (actualCapacity / plannedCapacity) * 100 : 0,
+      };
+    });
+  }, [projects, weekConfig, holidays, frSchedule, frCapacityDays, people]);
 
   const addPerson = () => {
     const newId = Math.max(0, ...people.map((p) => p.id)) + 1;
@@ -1196,43 +1268,11 @@ export default function CapacityPlanner() {
             const endIdx = weekConfig.findIndex((w) => w.id === project.endWeek);
             const projectWeeks = weekConfig.slice(startIdx, endIdx + 1);
 
-            // Calculate planned capacity (what's assigned)
-            const plannedCapacity = projectWeeks.reduce((total, week) => {
-              const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
-
-              const weekCapacity = project.assignments.reduce((sum, assignment) => {
-                // Check if person is working this week
-                const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
-                const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
-
-                if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
-                  return sum + assignment.daysPerWeek;
-                }
-                return sum;
-              }, 0);
-
-              return total + weekCapacity;
-            }, 0);
-
-            // Calculate actual available capacity (considering holidays, FR, availability)
-            const actualCapacity = projectWeeks.reduce((total, week) => {
-              const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
-
-              const weekCapacity = project.assignments.reduce((sum, assignment) => {
-                // Check if person is working this week
-                const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
-                const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
-
-                if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
-                  const personCapacity = getPersonCapacity(assignment.personId, week.id);
-                  // Person can contribute min of their assignment or their available capacity
-                  return sum + Math.min(assignment.daysPerWeek, personCapacity);
-                }
-                return sum;
-              }, 0);
-
-              return total + weekCapacity;
-            }, 0);
+            // Use memoized capacity calculations
+            const capacityData = projectCapacities.find((c) => c.projectId === project.id);
+            const plannedCapacity = capacityData?.plannedCapacity || 0;
+            const actualCapacity = capacityData?.actualCapacity || 0;
+            const capacityPercent = capacityData?.percentage || 0;
 
             return (
               <Collapsible key={project.id} className="bg-muted/20 border rounded-lg hover:bg-muted/30 transition-colors">
@@ -1311,10 +1351,12 @@ export default function CapacityPlanner() {
                     <TrendingUp className="h-4 w-4" />
                     <AlertDescription>
                       <div className="font-semibold">Project Capacity</div>
-                      <div className={`text-2xl font-bold ${actualCapacity < plannedCapacity ? 'text-warning' : ''}`}>
-                        {actualCapacity.toFixed(0)} / {plannedCapacity.toFixed(0)} days
-                        <span className="text-base ml-2">
-                          ({plannedCapacity > 0 ? ((actualCapacity / plannedCapacity) * 100).toFixed(0) : '0'}%)
+                      <div className="text-2xl font-bold">
+                        <span className={actualCapacity < plannedCapacity ? 'text-warning' : ''}>
+                          {actualCapacity.toFixed(0)} / {plannedCapacity.toFixed(0)} days
+                        </span>
+                        <span className={`text-base ml-2 ${getCapacityPercentColor(capacityPercent)}`}>
+                          ({capacityPercent.toFixed(0)}%)
                         </span>
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">
@@ -1461,8 +1503,11 @@ export default function CapacityPlanner() {
                           <ChevronDown className="w-5 h-5 transition-transform [[data-state=open]>&]:rotate-180" />
                           <div className="text-left">
                             <h3 className="text-lg font-semibold">{person.name}</h3>
-                            <div className="text-sm text-muted-foreground">
-                              {totalAllocated.toFixed(1)}d / {totalCapacity.toFixed(1)}d allocated • {utilizationPercent.toFixed(0)}% utilization
+                            <div className="text-sm">
+                              <span className="text-muted-foreground">{totalAllocated.toFixed(1)}d / {totalCapacity.toFixed(1)}d allocated • </span>
+                              <span className={`font-semibold ${getUtilizationColor(utilizationPercent)}`}>
+                                {utilizationPercent.toFixed(0)}% utilization
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -1532,7 +1577,7 @@ export default function CapacityPlanner() {
                                     <span className="text-muted-foreground">-</span>
                                   )}
                                 </TableCell>
-                                <TableCell className={`text-right font-semibold ${isOverallocated ? 'text-destructive' : 'text-green-600'}`}>
+                                <TableCell className={`text-right font-semibold ${getFreeDaysColor(free)}`}>
                                   {free.toFixed(1)}d
                                 </TableCell>
                               </TableRow>
@@ -1561,55 +1606,27 @@ export default function CapacityPlanner() {
                   const endIdx = weekConfig.findIndex((w) => w.id === project.endWeek);
                   const projectWeeks = weekConfig.slice(startIdx, endIdx + 1);
 
-                  // Calculate planned capacity (what's assigned)
-                  const plannedCapacity = projectWeeks.reduce((total, week) => {
-                    const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
-
-                    const weekCapacity = project.assignments.reduce((sum, assignment) => {
-                      const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
-                      const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
-
-                      if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
-                        return sum + assignment.daysPerWeek;
-                      }
-                      return sum;
-                    }, 0);
-
-                    return total + weekCapacity;
-                  }, 0);
-
-                  // Calculate actual available capacity (considering holidays, FR, availability)
-                  const actualCapacity = projectWeeks.reduce((total, week) => {
-                    const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
-
-                    const weekCapacity = project.assignments.reduce((sum, assignment) => {
-                      const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
-                      const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
-
-                      if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
-                        const personCapacity = getPersonCapacity(assignment.personId, week.id);
-                        // Person can contribute min of their assignment or their available capacity
-                        return sum + Math.min(assignment.daysPerWeek, personCapacity);
-                      }
-                      return sum;
-                    }, 0);
-
-                    return total + weekCapacity;
-                  }, 0);
+                  // Use memoized capacity calculations
+                  const capacityData = projectCapacities.find((c) => c.projectId === project.id);
+                  const plannedCapacity = capacityData?.plannedCapacity || 0;
+                  const actualCapacity = capacityData?.actualCapacity || 0;
+                  const capacityPercent = capacityData?.percentage || 0;
 
                   return (
                     <div key={project.id} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <div>
                           <h4 className="font-semibold">{project.name}</h4>
-                          <div className={`text-xs font-medium ${actualCapacity < plannedCapacity ? 'text-warning' : 'text-muted-foreground'}`}>
-                            {actualCapacity.toFixed(0)} / {plannedCapacity.toFixed(0)} days
+                          <div className="text-xs font-medium">
+                            <span className={actualCapacity < plannedCapacity ? 'text-warning' : 'text-muted-foreground'}>
+                              {actualCapacity.toFixed(0)} / {plannedCapacity.toFixed(0)} days
+                            </span>
                             {plannedCapacity > 0 && (
-                              <span className="ml-1">
-                                ({((actualCapacity / plannedCapacity) * 100).toFixed(0)}%)
+                              <span className={`ml-1 ${getCapacityPercentColor(capacityPercent)}`}>
+                                ({capacityPercent.toFixed(0)}%)
                               </span>
                             )}
-                            {actualCapacity < plannedCapacity && <span className="ml-1">⚠ Reduced by holidays/FR</span>}
+                            {actualCapacity < plannedCapacity && <span className="ml-1 text-warning">⚠ Reduced by holidays/FR</span>}
                           </div>
                         </div>
                         <span className="text-sm text-muted-foreground">
