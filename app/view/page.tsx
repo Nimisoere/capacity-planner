@@ -216,12 +216,14 @@ function SharedViewContent() {
                             const isOver = allocated > capacity;
 
                             const personProjects = data.projects.filter((project) => {
+                              const assignment = project.assignments.find((a) => a.personId === person.id);
+                              if (!assignment) return false;
+
+                              // Check if this week is within the person's assignment range
                               const weekIndex = data.weekConfig.findIndex((w) => w.id === week.id);
-                              const startIndex = data.weekConfig.findIndex((w) => w.id === project.startWeek);
-                              const endIndex = data.weekConfig.findIndex((w) => w.id === project.endWeek);
-                              const isInRange = weekIndex >= startIndex && weekIndex <= endIndex;
-                              const hasAssignment = project.assignments.find((a) => a.personId === person.id);
-                              return isInRange && hasAssignment;
+                              const assignmentStartIndex = data.weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                              const assignmentEndIndex = data.weekConfig.findIndex((w) => w.id === assignment.endWeek);
+                              return weekIndex >= assignmentStartIndex && weekIndex <= assignmentEndIndex;
                             });
 
                             return (

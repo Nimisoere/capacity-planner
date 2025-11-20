@@ -193,7 +193,7 @@ export default function CapacityPlanner() {
       // Migrate old projects that don't have per-person start/end weeks
       const migratedProjects = currentSchedule.projects.map((project) => ({
         ...project,
-        assignments: project.assignments.map((assignment: any) => ({
+        assignments: project.assignments.map((assignment) => ({
           ...assignment,
           startWeek: assignment.startWeek || project.startWeek,
           endWeek: assignment.endWeek || project.endWeek,
@@ -1196,9 +1196,42 @@ export default function CapacityPlanner() {
             const endIdx = weekConfig.findIndex((w) => w.id === project.endWeek);
             const projectWeeks = weekConfig.slice(startIdx, endIdx + 1);
 
-            const projectStats = projectWeeks.reduce((acc) => {
-              const weekCapacity = project.assignments.reduce((sum, assignment) => sum + assignment.daysPerWeek, 0);
-              return acc + weekCapacity;
+            // Calculate planned capacity (what's assigned)
+            const plannedCapacity = projectWeeks.reduce((total, week) => {
+              const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
+
+              const weekCapacity = project.assignments.reduce((sum, assignment) => {
+                // Check if person is working this week
+                const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+                if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
+                  return sum + assignment.daysPerWeek;
+                }
+                return sum;
+              }, 0);
+
+              return total + weekCapacity;
+            }, 0);
+
+            // Calculate actual available capacity (considering holidays, FR, availability)
+            const actualCapacity = projectWeeks.reduce((total, week) => {
+              const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
+
+              const weekCapacity = project.assignments.reduce((sum, assignment) => {
+                // Check if person is working this week
+                const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
+
+                if (weekIndex >= assignmentStartIdx && weekIndex <= assignmentEndIdx) {
+                  const personCapacity = getPersonCapacity(assignment.personId, week.id);
+                  // Person can contribute min of their assignment or their available capacity
+                  return sum + Math.min(assignment.daysPerWeek, personCapacity);
+                }
+                return sum;
+              }, 0);
+
+              return total + weekCapacity;
             }, 0);
 
             return (
@@ -1274,12 +1307,22 @@ export default function CapacityPlanner() {
                     </div>
                   </div>
 
-                  <Alert>
+                  <Alert className={actualCapacity < plannedCapacity ? 'border-warning bg-warning/5' : ''}>
                     <TrendingUp className="h-4 w-4" />
                     <AlertDescription>
-                      <div className="font-semibold">Total Project Capacity Required</div>
-                      <div className="text-2xl font-bold">{projectStats.toFixed(0)} days</div>
-                      <div className="text-xs text-muted-foreground">Across {projectWeeks.length} weeks</div>
+                      <div className="font-semibold">Project Capacity</div>
+                      <div className={`text-2xl font-bold ${actualCapacity < plannedCapacity ? 'text-warning' : ''}`}>
+                        {actualCapacity.toFixed(0)} / {plannedCapacity.toFixed(0)} days
+                        <span className="text-base ml-2">
+                          ({plannedCapacity > 0 ? ((actualCapacity / plannedCapacity) * 100).toFixed(0) : '0'}%)
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {actualCapacity < plannedCapacity
+                          ? `Reduced by holidays and FR duty`
+                          : `Full capacity available across ${projectWeeks.length} weeks`
+                        }
+                      </div>
                     </AlertDescription>
                   </Alert>
 
@@ -1287,8 +1330,6 @@ export default function CapacityPlanner() {
                     <Label>Team Assignments</Label>
                     {project.assignments.map((assignment) => {
                       const person = people.find((p) => p.id === assignment.personId);
-                      const assignmentStartIdx = weekConfig.findIndex((w) => w.id === assignment.startWeek);
-                      const assignmentEndIdx = weekConfig.findIndex((w) => w.id === assignment.endWeek);
                       return (
                         <div key={assignment.personId} className="border rounded-lg p-3 space-y-3 bg-background">
                           <div className="flex items-center justify-between">
@@ -1452,12 +1493,14 @@ export default function CapacityPlanner() {
                             const isOverallocated = allocated > capacity;
 
                             const personProjects = projects.filter((project) => {
+                              const assignment = project.assignments.find((a) => a.personId === person.id);
+                              if (!assignment) return false;
+
+                              // Check if this week is within the person's assignment range
                               const weekIndex = weekConfig.findIndex((w) => w.id === week.id);
-                              const startIndex = weekConfig.findIndex((w) => w.id === project.startWeek);
-                              const endIndex = weekConfig.findIndex((w) => w.id === project.endWeek);
-                              const isInRange = weekIndex >= startIndex && weekIndex <= endIndex;
-                              const hasAssignment = project.assignments.find((a) => a.personId === person.id);
-                              return isInRange && hasAssignment;
+                              const assignmentStartIndex = weekConfig.findIndex((w) => w.id === assignment.startWeek);
+                              const assignmentEndIndex = weekConfig.findIndex((w) => w.id === assignment.endWeek);
+                              return weekIndex >= assignmentStartIndex && weekIndex <= assignmentEndIndex;
                             });
 
                             return (
@@ -1521,7 +1564,7 @@ export default function CapacityPlanner() {
                       </div>
                       <div className="relative h-12 bg-muted rounded-lg overflow-hidden">
                         <div
-                          className="absolute h-full bg-primary/20 border-2 border-primary rounded"
+                          className="absolute h-full bg-primary/20 border-2 border-primary rounded-lg"
                           style={{
                             left: `${(startIdx / weekConfig.length) * 100}%`,
                             width: `${(projectWeeks.length / weekConfig.length) * 100}%`,
